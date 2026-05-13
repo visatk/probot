@@ -35,7 +35,8 @@ export async function handleCallbackQuery(
 			inline_keyboard: [
 				[{ text: `🔗 Anti-Link: ${settings.anti_link ? '🟢 ON' : '🔴 OFF'}`, callback_data: 'toggle_anti_link' }],
 				[{ text: `🔄 Anti-Forward: ${settings.anti_forward ? '🟢 ON' : '🔴 OFF'}`, callback_data: 'toggle_anti_forward' }],
-				[{ text: `🛡️ Anti-Spam: ${settings.anti_spam ? '🟢 ON' : '🔴 OFF'}`, callback_data: 'toggle_anti_spam' }]
+				[{ text: `🛡️ Anti-Spam: ${settings.anti_spam ? '🟢 ON' : '🔴 OFF'}`, callback_data: 'toggle_anti_spam' }],
+				[{ text: `🌊 Anti-Flood: ${settings.anti_flood ? '🟢 ON' : '🔴 OFF'}`, callback_data: 'toggle_anti_flood' }]
 			]
 		};
 
