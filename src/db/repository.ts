@@ -9,7 +9,6 @@ export class DbRepository {
 	}
 
 	async toggleSetting(chatId: number, setting: string): Promise<void> {
-		// Strict allowlist validation to prevent SQL injection or bad column references
 		const allowedSettings = ['anti_link', 'anti_forward', 'anti_spam'];
 		if (!allowedSettings.includes(setting)) throw new Error("Invalid setting column");
 
@@ -30,5 +29,18 @@ export class DbRepository {
 
 	async clearWarnings(userId: number, chatId: number): Promise<void> {
 		await this.db.prepare(`UPDATE user_infractions SET warnings = 0 WHERE user_id = ?1 AND chat_id = ?2`).bind(userId, chatId).run();
+	}
+
+	// New: Telemetry Aggregation for SOC Dashboard
+	async getGroupStats(chatId: number): Promise<{ total_actions: number, unique_violators: number }> {
+		const result = await this.db.batch<{ count: number }>([
+			this.db.prepare(`SELECT COUNT(*) as count FROM audit_logs WHERE chat_id = ?1`).bind(chatId),
+			this.db.prepare(`SELECT COUNT(DISTINCT user_id) as count FROM user_infractions WHERE chat_id = ?1`).bind(chatId)
+		]);
+		
+		return {
+			total_actions: result[0].results[0]?.count || 0,
+			unique_violators: result[1].results[0]?.count || 0
+		};
 	}
 }
