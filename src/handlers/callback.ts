@@ -16,26 +16,20 @@ export async function handleCallbackQuery(
 
 	const chatId = cb.message.chat.id;
 
-	// Interactive privilege check
-	const isAdmin = await adminSvc.isAdmin(chatId, cb.from.id);
-	if (!isAdmin) {
+	if (!(await adminSvc.isAdmin(chatId, cb.from.id))) {
 		c.executionCtx.waitUntil(tg.answerCallbackQuery(cb.id, "Access Denied: Administrators only.", true));
 		return;
 	}
 
-	// State Mutation Execution
 	if (cb.data?.startsWith('toggle_')) {
 		const setting = cb.data.replace('toggle_', '');
-		
 		try {
 			await db.toggleSetting(chatId, setting);
 		} catch (e) {
-			console.error("Invalid toggle operation:", e);
 			c.executionCtx.waitUntil(tg.answerCallbackQuery(cb.id, "Error updating settings.", true));
 			return;
 		}
 		
-		// Fetch updated state & Render Interface
 		const settings = await db.getSettings(chatId);
 		const keyboard = {
 			inline_keyboard: [
@@ -45,8 +39,7 @@ export async function handleCallbackQuery(
 			]
 		};
 
-		c.executionCtx.waitUntil(tg.editMessageText(chatId, cb.message.message_id, "⚙️ <b>Group Security Dashboard</b>\nSelect parameters to toggle:", keyboard));
+		c.executionCtx.waitUntil(tg.editMessageText(chatId, cb.message.message_id, "⚙️ <b>Group Security Dashboard</b>", keyboard));
 	}
-
 	c.executionCtx.waitUntil(tg.answerCallbackQuery(cb.id));
 }
