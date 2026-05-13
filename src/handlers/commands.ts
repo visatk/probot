@@ -18,7 +18,7 @@ export async function handleCommand(
 	// --- General Commands (Available in Private & Group) ---
 
 	if (command === '/start') {
-		const welcomeMsg = `👻 <b>GhostSweeper Security Node</b>\n\nI am an advanced, edge-optimized telemetry bot designed to protect your Telegram groups from spam, malicious links, and unauthorized forwards.\n\n🛡️ <b>Core Capabilities:</b>\n• Zero-latency threat neutralization\n• Interactive Admin Dashboard\n• Automated infraction tracking\n\n👨‍💻 <b>Architect & Developer:</b> <a href="https://t.me/CyberCoderBD">CyberCoderBD</a>\n\n<i>To begin, add me to your group and grant me Administrator privileges.</i>`;
+		const welcomeMsg = `👻 <b>GhostSweeper</b>\n\nI am an advanced, telemetry bot designed to protect your Telegram groups from spam, malicious links, and unauthorized forwards.\n\n🛡️ <b>Core Capabilities:</b>\n• Zero-latency threat neutralization\n• Interactive Admin Dashboard\n• Automated infraction tracking\n\n👨‍💻 <b>Architect & Developer:</b> <a href="https://t.me/CyberCoderBD">CyberCoderBD</a>\n\n<i>To begin, add me to your group and grant me Administrator privileges.</i>`;
 		
 		const keyboard = {
 			inline_keyboard: [
