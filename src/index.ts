@@ -1,4 +1,3 @@
-// src/index.ts
 import { Hono } from 'hono';
 
 // --- Bindings & Types ---
@@ -10,31 +9,35 @@ export interface Env {
 	TELEGRAM_SECRET_TOKEN: string;
 }
 
-interface TelegramUpdate {
-	update_id: number;
-	message?: TelegramMessage;
+interface TelegramUser {
+	id: number;
+	is_bot: boolean;
+	first_name: string;
+	username?: string;
 }
 
 interface TelegramMessage {
 	message_id: number;
-	from: { id: number; is_bot: boolean; first_name: string; username?: string };
+	from: TelegramUser;
 	chat: { id: number; type: string; title?: string };
 	date: number;
 	text?: string;
+	forward_origin?: any;
 	entities?: Array<{ type: string; offset: number; length: number; url?: string }>;
 }
 
-interface AuditLogEvent {
-	logId: string;
-	chatId: number;
-	userId: number;
-	action: string;
+interface TelegramUpdate {
+	update_id: number;
+	message?: TelegramMessage;
+	callback_query?: {
+		id: string;
+		from: TelegramUser;
+		message?: TelegramMessage;
+		data?: string;
+	};
 }
 
-// --- Application Initialization ---
-const app = new Hono<{ Bindings: Env }>();
-
-// --- Telegram API Helper ---
+// --- Telegram API Transport Layer ---
 class TelegramClient {
 	constructor(private token: string) {}
 
@@ -50,12 +53,20 @@ class TelegramClient {
 		return this.callApi('deleteMessage', { chat_id: chatId, message_id: messageId });
 	}
 
-	async sendMessage(chatId: number, text: string) {
-		return this.callApi('sendMessage', { chat_id: chatId, text, parse_mode: 'HTML' });
+	async sendMessage(chatId: number, text: string, replyMarkup?: any) {
+		return this.callApi('sendMessage', { chat_id: chatId, text, parse_mode: 'HTML', reply_markup: replyMarkup });
+	}
+
+	async editMessageText(chatId: number, messageId: number, text: string, replyMarkup?: any) {
+		return this.callApi('editMessageText', { chat_id: chatId, message_id: messageId, text, parse_mode: 'HTML', reply_markup: replyMarkup });
 	}
 
 	async banChatMember(chatId: number, userId: number, revokeMessages: boolean = true) {
 		return this.callApi('banChatMember', { chat_id: chatId, user_id: userId, revoke_messages: revokeMessages });
+	}
+
+	async answerCallbackQuery(callbackQueryId: string, text?: string, showAlert: boolean = false) {
+		return this.callApi('answerCallbackQuery', { callback_query_id: callbackQueryId, text, show_alert: showAlert });
 	}
 
 	async getChatAdministrators(chatId: number): Promise<number[]> {
@@ -66,82 +77,134 @@ class TelegramClient {
 	}
 }
 
-// --- Core Webhook Router ---
-app.post('/webhook', async (c) => {
+// --- Security & Policy Enforcement ---
+const app = new Hono<{ Bindings: Env }>();
+
+// Security Middleware: Validate Edge Invocations
+app.use('/webhook', async (c, next) => {
 	const secretToken = c.req.header('X-Telegram-Bot-Api-Secret-Token');
-	if (secretToken !== c.env.TELEGRAM_SECRET_TOKEN) {
-		return c.text('Unauthorized', 401);
-	}
+	if (secretToken !== c.env.TELEGRAM_SECRET_TOKEN) return c.text('Unauthorized', 401);
+	await next();
+});
 
+app.post('/webhook', async (c) => {
 	const update: TelegramUpdate = await c.req.json();
-	if (!update.message) return c.text('OK'); // Acknowledge non-message updates
+	const tg = new TelegramClient(c.env.TELEGRAM_BOT_TOKEN);
 
-	const { message } = update;
-	const { chat, from } = message;
+	// --- 1. Interactive UI/UX: Settings Dashboard (Callback Queries) ---
+	if (update.callback_query) {
+		const cb = update.callback_query;
+		const chatId = cb.message?.chat.id;
+		if (!chatId) return c.text('OK');
 
-	// Only process group or supergroup messages
-	if (chat.type !== 'group' && chat.type !== 'supergroup') {
+		// Privilege Check via Edge Cache
+		const cacheKey = `admins:${chatId}`;
+		let admins: number[] = await c.env.KV.get(cacheKey, 'json') || [];
+		if (admins.length === 0) {
+			admins = await tg.getChatAdministrators(chatId);
+			await c.env.KV.put(cacheKey, JSON.stringify(admins), { expirationTtl: 3600 });
+		}
+
+		if (!admins.includes(cb.from.id)) {
+			c.executionCtx.waitUntil(tg.answerCallbackQuery(cb.id, "Access Denied: Administrators only.", true));
+			return c.text('OK');
+		}
+
+		// State Mutation
+		if (cb.data?.startsWith('toggle_')) {
+			const setting = cb.data.replace('toggle_', '');
+			await c.env.DB.prepare(`
+				INSERT INTO group_settings (chat_id, ${setting}) VALUES (?1, 0)
+				ON CONFLICT(chat_id) DO UPDATE SET ${setting} = NOT ${setting}
+			`).bind(chatId).run();
+		}
+
+		// Fetch updated state & Render
+		const settings = await c.env.DB.prepare(`SELECT * FROM group_settings WHERE chat_id = ?1`).bind(chatId).first() || 
+			{ anti_link: 1, anti_forward: 0, anti_spam: 1, max_warnings: 3 };
+
+		const keyboard = {
+			inline_keyboard: [
+				[{ text: `🔗 Anti-Link: ${settings.anti_link ? '🟢 ON' : '🔴 OFF'}`, callback_data: 'toggle_anti_link' }],
+				[{ text: `🔄 Anti-Forward: ${settings.anti_forward ? '🟢 ON' : '🔴 OFF'}`, callback_data: 'toggle_anti_forward' }],
+				[{ text: `🛡️ Anti-Spam: ${settings.anti_spam ? '🟢 ON' : '🔴 OFF'}`, callback_data: 'toggle_anti_spam' }]
+			]
+		};
+
+		c.executionCtx.waitUntil(tg.editMessageText(chatId, cb.message!.message_id, "⚙️ <b>Group Security Dashboard</b>\nSelect parameters to toggle:", keyboard));
+		c.executionCtx.waitUntil(tg.answerCallbackQuery(cb.id));
 		return c.text('OK');
 	}
 
-	const tg = new TelegramClient(c.env.TELEGRAM_BOT_TOKEN);
+	// --- 2. Message Processing Pipeline ---
+	if (!update.message) return c.text('OK');
+	const { message } = update;
+	const { chat, from } = message;
 
-	// 1. Threat Detection: Check for URLs or Mentions
-	const hasLink = message.entities?.some(e => e.type === 'url' || e.type === 'text_link');
-	
-	if (hasLink && !from.is_bot) {
-		// 2. Privilege Escalation Check: Is user an admin? 
-		// Use KV for edge-caching Admin lists to avoid Telegram API rate limits.
+	if (chat.type !== 'group' && chat.type !== 'supergroup') return c.text('OK');
+
+	// Command Router
+	if (message.text?.startsWith('/settings')) {
 		const cacheKey = `admins:${chat.id}`;
 		let admins: number[] = await c.env.KV.get(cacheKey, 'json') || [];
-
-		if (admins.length === 0) {
-			admins = await tg.getChatAdministrators(chat.id);
-			await c.env.KV.put(cacheKey, JSON.stringify(admins), { expirationTtl: 3600 }); // Cache for 1 hour
+		if (!admins.length) admins = await tg.getChatAdministrators(chat.id);
+		
+		if (admins.includes(from.id)) {
+			const settings = await c.env.DB.prepare(`SELECT * FROM group_settings WHERE chat_id = ?1`).bind(chat.id).first() || 
+				{ anti_link: 1, anti_forward: 0, anti_spam: 1 };
+			
+			const keyboard = {
+				inline_keyboard: [
+					[{ text: `🔗 Anti-Link: ${settings.anti_link ? '🟢 ON' : '🔴 OFF'}`, callback_data: 'toggle_anti_link' }],
+					[{ text: `🔄 Anti-Forward: ${settings.anti_forward ? '🟢 ON' : '🔴 OFF'}`, callback_data: 'toggle_anti_forward' }],
+					[{ text: `🛡️ Anti-Spam: ${settings.anti_spam ? '🟢 ON' : '🔴 OFF'}`, callback_data: 'toggle_anti_spam' }]
+				]
+			};
+			c.executionCtx.waitUntil(tg.sendMessage(chat.id, "⚙️ <b>Group Security Dashboard</b>\nSelect parameters to toggle:", keyboard));
 		}
+		return c.text('OK');
+	}
+
+	// Threat Analysis Execution
+	if (!from.is_bot) {
+		const cacheKey = `admins:${chat.id}`;
+		let admins: number[] = await c.env.KV.get(cacheKey, 'json') || [];
+		if (!admins.length) admins = await tg.getChatAdministrators(chat.id);
 
 		if (!admins.includes(from.id)) {
-			// 3. Execution: Delete Malicious Content
-			c.executionCtx.waitUntil(tg.deleteMessage(chat.id, message.message_id));
+			const settings = await c.env.DB.prepare(`SELECT * FROM group_settings WHERE chat_id = ?1`).bind(chat.id).first() || 
+				{ anti_link: 1, anti_forward: 0, anti_spam: 1, max_warnings: 3 };
 
-			// 4. State Management: Record Infraction in D1
-			const result = await c.env.DB.prepare(`
-				INSERT INTO user_infractions (user_id, chat_id, warnings) 
-				VALUES (?1, ?2, 1) 
-				ON CONFLICT(user_id, chat_id) 
-				DO UPDATE SET warnings = warnings + 1, last_violation = CURRENT_TIMESTAMP
-				RETURNING warnings;
-			`).bind(from.id, chat.id).first<{ warnings: number }>();
+			let violationType: string | null = null;
 
-			const warnings = result?.warnings || 1;
+			const hasLink = message.entities?.some(e => e.type === 'url' || e.type === 'text_link' || e.type === 'mention');
+			const isForward = !!message.forward_origin;
+			const isSpam = message.text && message.text.length > 800 && settings.anti_spam;
 
-			// Fetch group settings
-			const settings = await c.env.DB.prepare(
-				`SELECT max_warnings FROM group_settings WHERE chat_id = ?1`
-			).bind(chat.id).first<{ max_warnings: number }>();
-			const maxWarnings = settings?.max_warnings || 3;
+			if (hasLink && settings.anti_link) violationType = 'LINK_OR_MENTION';
+			else if (isForward && settings.anti_forward) violationType = 'UNAUTHORIZED_FORWARD';
+			else if (isSpam) violationType = 'TEXT_SPAM';
 
-			// 5. Enforcement: Ban if threshold met, otherwise warn
-			if (warnings >= maxWarnings) {
-				c.executionCtx.waitUntil(tg.banChatMember(chat.id, from.id));
-				c.executionCtx.waitUntil(tg.sendMessage(chat.id, `🚨 <b>Security Alert</b>\nUser <a href="tg://user?id=${from.id}">${from.first_name}</a> has been permanently banned for repeated link spamming.`));
-				
-				// Dispatch to Queue for long-term audit storage
-				c.executionCtx.waitUntil(c.env.QUEUE.send({
-					logId: crypto.randomUUID(),
-					chatId: chat.id,
-					userId: from.id,
-					action: 'BANNED_FOR_SPAM'
-				}));
-			} else {
-				c.executionCtx.waitUntil(tg.sendMessage(chat.id, `⚠️ <b>Warning (${warnings}/${maxWarnings})</b>\n<a href="tg://user?id=${from.id}">${from.first_name}</a>, links are not permitted in this group.`));
-				
-				c.executionCtx.waitUntil(c.env.QUEUE.send({
-					logId: crypto.randomUUID(),
-					chatId: chat.id,
-					userId: from.id,
-					action: 'WARNING_ISSUED_FOR_LINK'
-				}));
+			if (violationType) {
+				c.executionCtx.waitUntil(tg.deleteMessage(chat.id, message.message_id));
+
+				const result = await c.env.DB.prepare(`
+					INSERT INTO user_infractions (user_id, chat_id, warnings) VALUES (?1, ?2, 1) 
+					ON CONFLICT(user_id, chat_id) DO UPDATE SET warnings = warnings + 1, last_violation = CURRENT_TIMESTAMP
+					RETURNING warnings;
+				`).bind(from.id, chat.id).first<{ warnings: number }>();
+
+				const warnings = result?.warnings || 1;
+				const maxWarnings = Number(settings.max_warnings) || 3;
+
+				if (warnings >= maxWarnings) {
+					c.executionCtx.waitUntil(tg.banChatMember(chat.id, from.id));
+					c.executionCtx.waitUntil(tg.sendMessage(chat.id, `🚨 <b>Enforcement Protocol</b>\nUser <a href="tg://user?id=${from.id}">${from.first_name}</a> has been permanently removed. Reason: Persistent Policy Violations.`));
+					c.executionCtx.waitUntil(c.env.QUEUE.send({ logId: crypto.randomUUID(), chatId: chat.id, userId: from.id, action: `BANNED_${violationType}` }));
+				} else {
+					c.executionCtx.waitUntil(tg.sendMessage(chat.id, `⚠️ <b>Automated Warning (${warnings}/${maxWarnings})</b>\n<a href="tg://user?id=${from.id}">${from.first_name}</a>, your message violated group policy (${violationType}).`));
+					c.executionCtx.waitUntil(c.env.QUEUE.send({ logId: crypto.randomUUID(), chatId: chat.id, userId: from.id, action: `WARNING_${violationType}` }));
+				}
 			}
 		}
 	}
@@ -149,27 +212,21 @@ app.post('/webhook', async (c) => {
 	return c.text('OK');
 });
 
-// --- Export Handlers ---
 export default {
 	fetch: app.fetch,
 
-	// Queue Consumer for background asynchronous operations
-	async queue(batch: MessageBatch<AuditLogEvent>, env: Env, ctx: ExecutionContext): Promise<void> {
-		const stmt = env.DB.prepare(
-			`INSERT INTO audit_logs (log_id, chat_id, user_id, action) VALUES (?1, ?2, ?3, ?4)`
-		);
-
-		const batchInsertions = batch.messages.map(msg => 
-			stmt.bind(msg.body.logId, msg.body.chatId, msg.body.userId, msg.body.action)
-		);
+	// --- 3. Asynchronous Observability (Queue Consumer) ---
+	async queue(batch: MessageBatch<any>, env: Env, ctx: ExecutionContext): Promise<void> {
+		const stmt = env.DB.prepare(`INSERT INTO audit_logs (log_id, chat_id, user_id, action) VALUES (?1, ?2, ?3, ?4)`);
+		const batchInsertions = batch.messages.map(msg => stmt.bind(msg.body.logId, msg.body.chatId, msg.body.userId, msg.body.action));
 
 		if (batchInsertions.length > 0) {
 			try {
 				await env.DB.batch(batchInsertions);
 				batch.ackAll();
 			} catch (error) {
-				console.error("Failed to process audit logs queue batch", error);
-				// Messages will be automatically retried based on max_batch_timeout
+				console.error("D1 Batch Insertion Error:", error);
+				// Let Cloudflare implicitly retry the batch based on max_batch_timeout configurations
 			}
 		}
 	}
