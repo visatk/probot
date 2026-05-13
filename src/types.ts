@@ -1,7 +1,7 @@
 export interface Env {
 	DB: D1Database;
 	KV: KVNamespace;
-	QUEUE: Queue;
+	QUEUE: Queue<QueuePayload>;
 	TELEGRAM_BOT_TOKEN: string;
 	TELEGRAM_SECRET_TOKEN: string;
 }
@@ -11,7 +11,17 @@ export interface GroupSettings {
 	anti_link: number;
 	anti_forward: number;
 	anti_spam: number;
+	anti_flood: number;
 	max_warnings: number;
+	log_channel_id: number | null;
+}
+
+export interface QueuePayload {
+	logId: string;
+	chatId: number;
+	userId: number;
+	action: string;
+	metadata?: any;
 }
 
 export interface TelegramUser { 
@@ -36,14 +46,24 @@ export interface TelegramMessage {
 	caption?: string;
 	forward_origin?: any;
 	new_chat_members?: TelegramUser[];
+	left_chat_member?: TelegramUser;
 	reply_to_message?: TelegramMessage;
 	entities?: Array<{ type: string; offset: number; length: number; url?: string }>;
 	caption_entities?: Array<{ type: string; offset: number; length: number; url?: string }>;
 }
 
+export interface ChatMemberUpdated {
+	chat: TelegramChat;
+	from: TelegramUser;
+	date: number;
+	old_chat_member: { status: string; user: TelegramUser };
+	new_chat_member: { status: string; user: TelegramUser };
+}
+
 export interface TelegramUpdate {
 	update_id: number;
 	message?: TelegramMessage;
+	my_chat_member?: ChatMemberUpdated;
 	callback_query?: { 
 		id: string; 
 		from: TelegramUser; 
