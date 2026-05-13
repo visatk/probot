@@ -2,32 +2,33 @@ import { Env } from '../types';
 import { TelegramClient } from './telegram';
 
 export class AdminService {
-	private requestCache = new Map<number, number[]>();
+	private requestCache = new Map<number, Set<number>>();
 
 	constructor(private env: Env, private tg: TelegramClient) {}
 
-	async getAdmins(chatId: number): Promise<number[]> {
+	async getAdmins(chatId: number): Promise<Set<number>> {
 		if (this.requestCache.has(chatId)) {
 			return this.requestCache.get(chatId)!;
 		}
 
 		const cacheKey = `admins:${chatId}`;
-		let admins = await this.env.KV.get<number[]>(cacheKey, 'json');
+		let adminsArr = await this.env.KV.get<number[]>(cacheKey, 'json');
 
-		if (!admins || admins.length === 0) {
-			admins = await this.tg.getChatAdministrators(chatId);
-			if (admins.length > 0) {
-				// 5 minute TTL is sufficient for edge admin validation
-				await this.env.KV.put(cacheKey, JSON.stringify(admins), { expirationTtl: 300 });
+		if (!adminsArr || adminsArr.length === 0) {
+			adminsArr = await this.tg.getChatAdministrators(chatId);
+			if (adminsArr.length > 0) {
+				// 5 minute TTL for rapid edge validations
+				await this.env.KV.put(cacheKey, JSON.stringify(adminsArr), { expirationTtl: 300 });
 			}
 		}
 
-		this.requestCache.set(chatId, admins || []);
-		return admins || [];
+		const adminSet = new Set<number>(adminsArr || []);
+		this.requestCache.set(chatId, adminSet);
+		return adminSet;
 	}
 
 	async isAdmin(chatId: number, userId: number): Promise<boolean> {
-		const admins = await this.getAdmins(chatId);
-		return admins.includes(userId);
+		const adminSet = await this.getAdmins(chatId);
+		return adminSet.has(userId);
 	}
 }
