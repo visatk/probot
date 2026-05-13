@@ -15,23 +15,44 @@ export async function handleCommand(
 	const text = msg.text || '';
 	const [command, ...args] = text.split(' ');
 
+	// --- General Commands (Available in Private & Group) ---
+
 	if (command === '/start') {
-		const welcomeMsg = `🤖 <b>GhostSweeper Edge Security Node</b>\n\nAdvanced threat neutralization and telemetry bot.\n\nTo begin, add me to your group and grant Administrator privileges. Use /settings in your group to configure policies.`;
-		c.executionCtx.waitUntil(tg.sendMessage(chatId, welcomeMsg));
+		const welcomeMsg = `👻 <b>GhostSweeper Security Node</b>\n\nI am an advanced, edge-optimized telemetry bot designed to protect your Telegram groups from spam, malicious links, and unauthorized forwards.\n\n🛡️ <b>Core Capabilities:</b>\n• Zero-latency threat neutralization\n• Interactive Admin Dashboard\n• Automated infraction tracking\n\n👨‍💻 <b>Architect & Developer:</b> <a href="https://t.me/CyberCoderBD">CyberCoderBD</a>\n\n<i>To begin, add me to your group and grant me Administrator privileges.</i>`;
+		
+		const keyboard = {
+			inline_keyboard: [
+				// Deep link to instantly prompt the user to add the bot to a group
+				[{ text: `➕ Add GhostSweeper to Group`, url: `https://t.me/GhostSweeperBot?startgroup=true` }],
+				[{ text: `👨‍💻 Developer Support`, url: `https://t.me/CyberCoderBD` }]
+			]
+		};
+
+		c.executionCtx.waitUntil(tg.sendMessage(chatId, welcomeMsg, keyboard));
 		return;
 	}
 
+	if (command === '/help') {
+		const helpMsg = `📖 <b>GhostSweeper Command Reference</b>\n\n<b>🛡️ Admin Commands</b> <i>(Requires Group Admin)</i>\n⚙️ <code>/settings</code> - Open the interactive security dashboard\n🔨 <code>/ban</code> - Ban a user (reply to their message)\n✅ <code>/unban</code> - Lift a ban & clear infractions (reply to message)\n📊 <code>/stats</code> - View edge telemetry and intervention metrics\n\n<b>👤 General Commands</b>\nℹ️ <code>/start</code> - Display bot info and developer links\n🆘 <code>/help</code> - Show this command manual\n\n<i>Note: Anti-spam and anti-link policies are automatically enforced on standard users. Administrators are exempt from automated edge filtering.</i>`;
+		
+		c.executionCtx.waitUntil(tg.sendMessage(chatId, helpMsg));
+		return;
+	}
+
+	// --- Route Protection: Following commands strictly require a Group context ---
 	if (msg.chat.type === 'private') return;
 
 	// Verify Privilege Level
 	const isAdmin = await adminSvc.isAdmin(chatId, msg.from.id);
 	if (!isAdmin) return; 
 
-	// Helper to extract target user from reply or text
+	// Helper to extract target user from reply
 	const getTargetUser = (): number | null => {
 		if (msg.reply_to_message?.from) return msg.reply_to_message.from.id;
-		return null; // Note: Expanding this to parse mentions from 'args' would require resolving usernames via MTProto, relying on replies is more resilient for bots.
+		return null; 
 	};
+
+	// --- Administrator Commands ---
 
 	switch (command) {
 		case '/settings': {
@@ -50,7 +71,7 @@ export async function handleCommand(
 		case '/ban': {
 			const targetId = getTargetUser();
 			if (!targetId) {
-				c.executionCtx.waitUntil(tg.sendMessage(chatId, "⚠️ <b>Syntax Error:</b> Reply to a message to /ban the user."));
+				c.executionCtx.waitUntil(tg.sendMessage(chatId, "⚠️ <b>Syntax Error:</b> Please reply to a specific user's message to execute <code>/ban</code>."));
 				return;
 			}
 			c.executionCtx.waitUntil(tg.banChatMember(chatId, targetId));
@@ -61,17 +82,20 @@ export async function handleCommand(
 
 		case '/unban': {
 			const targetId = getTargetUser();
-			if (!targetId) return;
+			if (!targetId) {
+				c.executionCtx.waitUntil(tg.sendMessage(chatId, "⚠️ <b>Syntax Error:</b> Please reply to a specific user's message to execute <code>/unban</code>."));
+				return;
+			}
 			c.executionCtx.waitUntil(tg.unbanChatMember(chatId, targetId));
 			c.executionCtx.waitUntil(db.clearWarnings(targetId, chatId));
-			c.executionCtx.waitUntil(tg.sendMessage(chatId, `✅ User ban lifted and infraction records cleared.`));
+			c.executionCtx.waitUntil(tg.sendMessage(chatId, `✅ User ban lifted and all prior infraction records cleared.`));
 			c.executionCtx.waitUntil(c.env.QUEUE.send({ logId: crypto.randomUUID(), chatId, userId: targetId, action: `MANUAL_UNBAN` }));
 			break;
 		}
 
 		case '/stats': {
 			const stats = await db.getGroupStats(chatId);
-			const report = `📊 <b>Group Security Telemetry</b>\n\n🛡️ <b>Total Interventions:</b> ${stats.total_actions}\n👤 <b>Tracked Violators:</b> ${stats.unique_violators}\n⚡ <b>Latency:</b> Edge Optimized`;
+			const report = `📊 <b>Group Security Telemetry</b>\n\n🛡️ <b>Total Interventions:</b> ${stats.total_actions}\n👤 <b>Tracked Violators:</b> ${stats.unique_violators}\n⚡ <b>Routing Latency:</b> Edge Optimized`;
 			c.executionCtx.waitUntil(tg.sendMessage(chatId, report));
 			break;
 		}
