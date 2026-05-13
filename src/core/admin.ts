@@ -17,6 +17,7 @@ export class AdminService {
 		if (!admins || admins.length === 0) {
 			admins = await this.tg.getChatAdministrators(chatId);
 			if (admins.length > 0) {
+				// 5 minute TTL is sufficient for edge admin validation
 				await this.env.KV.put(cacheKey, JSON.stringify(admins), { expirationTtl: 300 });
 			}
 		}
