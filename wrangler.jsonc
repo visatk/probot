@@ -1,22 +1,22 @@
 {
-	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "pro",
-	"main": "src/index.ts",
-	"compatibility_date": "2026-04-12",
-	"compatibility_flags": [
-		"nodejs_compat"
-	],
-	"observability": {
-		"enabled": true
-	},
-    "d1_databases": [
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ghostsweeper-edge",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-05-13",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "observability": {
+    "enabled": true
+  },
+  "d1_databases": [
     {
       "binding": "DB",
       "database_name": "bot",
       "database_id": "276d1c92-c196-497f-9d92-2085c4e9a93d"
     }
   ],
-   "kv_namespaces": [
+  "kv_namespaces": [
     {
       "binding": "KV",
       "id": "344c878cf334400798af5ad0d1ebb757"
@@ -32,8 +32,9 @@
     "consumers": [
       {
         "queue": "bot",
-        "max_batch_size": 10,
-        "max_batch_timeout": 5
+        "max_batch_size": 20,
+        "max_batch_timeout": 5,
+        "max_retries": 3
       }
     ]
   }
