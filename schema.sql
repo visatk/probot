@@ -1,9 +1,13 @@
+-- Core Group Configuration
 CREATE TABLE IF NOT EXISTS group_settings (
     chat_id INTEGER PRIMARY KEY,
     anti_link BOOLEAN DEFAULT 1,
+    anti_forward BOOLEAN DEFAULT 0,
+    anti_spam BOOLEAN DEFAULT 1,
     max_warnings INTEGER DEFAULT 3
 );
 
+-- Infraction Tracking
 CREATE TABLE IF NOT EXISTS user_infractions (
     user_id INTEGER,
     chat_id INTEGER,
@@ -12,6 +16,7 @@ CREATE TABLE IF NOT EXISTS user_infractions (
     PRIMARY KEY (user_id, chat_id)
 );
 
+-- Telemetry & Auditing
 CREATE TABLE IF NOT EXISTS audit_logs (
     log_id TEXT PRIMARY KEY,
     chat_id INTEGER,
@@ -19,3 +24,7 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     action TEXT,
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Indices for optimal query performance
+CREATE INDEX IF NOT EXISTS idx_audit_logs_chat ON audit_logs(chat_id);
+CREATE INDEX IF NOT EXISTS idx_infractions_user ON user_infractions(user_id);
