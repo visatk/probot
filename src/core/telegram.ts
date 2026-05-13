@@ -23,7 +23,10 @@ export class TelegramClient {
 						return this.callApi(method, payload, retries - 1);
 					}
 				}
-				console.error(`Telegram API Error (${method}):`, errorData);
+				// Suppress missing message errors which are common in fast cleanups
+				if (errorData.description && !errorData.description.includes('message to delete not found')) {
+					console.error(`Telegram API Error (${method}):`, errorData);
+				}
 			}
 			return response;
 		} catch (error) {
