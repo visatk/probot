@@ -169,7 +169,7 @@ app.post('/webhook', async (c) => {
 
 	// Global Onboarding Command (Works in Private and Group chats)
 	if (message.text?.startsWith('/start')) {
-		const welcomeMsg = `🤖 <b>Elite Group Protection Bot</b>\n\nI am an advanced security and telemetry bot deployed on the edge, designed to protect groups from malicious links, spam, and unauthorized forwards.\n\n🛡️ <b>Core Features:</b>\n- Zero-Latency Threat Neutralization\n- Automated Infraction Tracking\n- Real-time Interactive Admin Dashboard\n\n👨‍💻 <b>Developer & Architect:</b> <a href="https://t.me/drkingbd">Dr. King</a>\n\n<i>To begin, add me to your group and grant Administrator privileges. Use the /settings command in your group to configure policies.</i>`;
+		const welcomeMsg = `🤖 <b>GhostSweeper Group Protection Bot</b>\n\nI am an advanced security and telemetry bot deployed on the edge, designed to protect groups from malicious links, spam, and unauthorized forwards.\n\n🛡️ <b>Core Features:</b>\n- Zero-Latency Threat Neutralization\n- Automated Infraction Tracking\n- Real-time Interactive Admin Dashboard\n\n👨‍💻 <b>Developer & Architect:</b> <a href="https://t.me/drkingbd">Dr. King</a>\n\n<i>To begin, add me to your group and grant Administrator privileges. Use the /settings command in your group to configure policies.</i>`;
 		
 		const keyboard = {
 			inline_keyboard: [
