@@ -1,18 +1,29 @@
 export class TelegramClient {
 	constructor(private token: string) {}
 
-	async callApi(method: string, payload: any): Promise<Response | null> {
+	async callApi(method: string, payload: any, retries = 1): Promise<Response | null> {
 		try {
-			// Native ES2024 timeout protects worker CPU/Memory limits without closure leaks
 			const response = await fetch(`https://api.telegram.org/bot${this.token}/${method}`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify(payload),
-				signal: AbortSignal.timeout(5000)
+				signal: AbortSignal.timeout(6000)
 			});
 			
 			if (!response.ok) {
-				console.error(`Telegram API Error (${method}):`, await response.text());
+				const status = response.status;
+				const errorData = await response.json() as any;
+				
+				// 429 Rate Limit Handling Protocol
+				if (status === 429 && retries > 0) {
+					const retryAfter = errorData.parameters?.retry_after || 1;
+					// Cap sleep to 3 seconds to avoid worker isolate death
+					if (retryAfter <= 3) {
+						await new Promise(res => setTimeout(res, retryAfter * 1000));
+						return this.callApi(method, payload, retries - 1);
+					}
+				}
+				console.error(`Telegram API Error (${method}):`, errorData);
 			}
 			return response;
 		} catch (error) {
