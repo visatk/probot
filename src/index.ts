@@ -66,11 +66,11 @@ class TelegramClient {
 	}
 
 	async sendMessage(chatId: number, text: string, replyMarkup?: any) {
-		return this.callApi('sendMessage', { chat_id: chatId, text, parse_mode: 'HTML', reply_markup: replyMarkup });
+		return this.callApi('sendMessage', { chat_id: chatId, text, parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: replyMarkup });
 	}
 
 	async editMessageText(chatId: number, messageId: number, text: string, replyMarkup?: any) {
-		return this.callApi('editMessageText', { chat_id: chatId, message_id: messageId, text, parse_mode: 'HTML', reply_markup: replyMarkup });
+		return this.callApi('editMessageText', { chat_id: chatId, message_id: messageId, text, parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: replyMarkup });
 	}
 
 	async banChatMember(chatId: number, userId: number) {
@@ -137,7 +137,6 @@ app.post('/webhook', async (c) => {
 		// State Mutation
 		if (cb.data?.startsWith('toggle_')) {
 			const setting = cb.data.replace('toggle_', '');
-			// Validate setting parameter to prevent SQL injection edge cases
 			if (['anti_link', 'anti_forward', 'anti_spam'].includes(setting)) {
 				await c.env.DB.prepare(`
 					INSERT INTO group_settings (chat_id, ${setting}) VALUES (?1, 0)
@@ -168,6 +167,23 @@ app.post('/webhook', async (c) => {
 	const { message } = update;
 	const { chat, from } = message;
 
+	// Global Onboarding Command (Works in Private and Group chats)
+	if (message.text?.startsWith('/start')) {
+		const welcomeMsg = `🤖 <b>Elite Group Protection Bot</b>\n\nI am an advanced security and telemetry bot deployed on the edge, designed to protect groups from malicious links, spam, and unauthorized forwards.\n\n🛡️ <b>Core Features:</b>\n- Zero-Latency Threat Neutralization\n- Automated Infraction Tracking\n- Real-time Interactive Admin Dashboard\n\n👨‍💻 <b>Developer & Architect:</b> <a href="https://t.me/drkingbd">Dr. King</a>\n\n<i>To begin, add me to your group and grant Administrator privileges. Use the /settings command in your group to configure policies.</i>`;
+		
+		const keyboard = {
+			inline_keyboard: [
+				[{ text: `👨‍💻 Contact Developer`, url: 'https://t.me/drkingbd' }],
+				// Provide a generic deep link for users to add the bot to their groups easily.
+				[{ text: `➕ Add to Group`, url: `https://t.me/botfather` }] // Change 'botfather' to your actual bot's username once created
+			]
+		};
+
+		c.executionCtx.waitUntil(tg.sendMessage(chat.id, welcomeMsg, keyboard));
+		return c.text('OK');
+	}
+
+	// Ensure Threat Analysis only runs in Groups/Supergroups
 	if (chat.type !== 'group' && chat.type !== 'supergroup') return c.text('OK');
 
 	// Routing: Admin Configuration Command
@@ -189,7 +205,7 @@ app.post('/webhook', async (c) => {
 			};
 			c.executionCtx.waitUntil(tg.sendMessage(chat.id, "⚙️ <b>Group Security Dashboard</b>\nSelect parameters to toggle:", keyboard));
 		}
-		return c.text('OK'); // Always ACK to Telegram quickly
+		return c.text('OK'); 
 	}
 
 	// Threat Analysis Execution
@@ -198,6 +214,7 @@ app.post('/webhook', async (c) => {
 		let admins: number[] = await c.env.KV.get(cacheKey, 'json') || [];
 		if (!admins.length) admins = await tg.getChatAdministrators(chat.id);
 
+		// Admins bypass all filters
 		if (!admins.includes(from.id)) {
 			const settings = await c.env.DB.prepare(`SELECT * FROM group_settings WHERE chat_id = ?1`).bind(chat.id).first() || 
 				{ anti_link: 1, anti_forward: 0, anti_spam: 1, max_warnings: 3 };
