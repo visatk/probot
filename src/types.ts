@@ -14,13 +14,6 @@ export interface GroupSettings {
 	max_warnings: number;
 }
 
-export interface UserInfraction {
-	user_id: number;
-	chat_id: number;
-	warnings: number;
-	last_violation: string;
-}
-
 export interface TelegramUser { 
 	id: number; 
 	is_bot: boolean; 
@@ -43,7 +36,7 @@ export interface TelegramMessage {
 	caption?: string;
 	forward_origin?: any;
 	new_chat_members?: TelegramUser[];
-	reply_to_message?: TelegramMessage; // Required for moderation targeting
+	reply_to_message?: TelegramMessage;
 	entities?: Array<{ type: string; offset: number; length: number; url?: string }>;
 	caption_entities?: Array<{ type: string; offset: number; length: number; url?: string }>;
 }
