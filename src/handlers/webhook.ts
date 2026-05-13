@@ -6,6 +6,9 @@ import { DbRepository } from '../db/repository';
 import { handleCommand } from './commands';
 import { handleCallbackQuery } from './callback';
 
+// Isolate-scoped memory cache for sub-minute flood detection.
+const isolateFloodCache = new Map<string, { count: number; timestamp: number }>();
+
 export async function handleWebhook(c: Context<{ Bindings: Env }>) {
 	try {
 		const update: TelegramUpdate = await c.req.json();
@@ -24,13 +27,13 @@ export async function handleWebhook(c: Context<{ Bindings: Env }>) {
 
 			if (msg.new_chat_members) {
 				const names = msg.new_chat_members.map(u => u.first_name).join(', ');
-				c.executionCtx.waitUntil(tg.sendMessage(chatId, `👋 Welcome to the group, ${names}! Please review our rules.`));
+				c.executionCtx.waitUntil(tg.sendMessage(chatId, `👋 Welcome, ${names}! Please review our rules.`));
 				return c.text('OK');
 			}
 
 			if (!msg.text && !msg.caption) return c.text('OK');
 
-			if (msg.text?.startsWith('/')) {
+			if (msg.text?.startsWith('/') || msg.caption?.startsWith('/')) {
 				await handleCommand(c, msg, tg, adminSvc, db);
 				return c.text('OK');
 			}
@@ -38,17 +41,27 @@ export async function handleWebhook(c: Context<{ Bindings: Env }>) {
 			if (msg.chat.type === 'group' || msg.chat.type === 'supergroup') {
 				if (!msg.from.is_bot && !(await adminSvc.isAdmin(chatId, msg.from.id))) {
 					
-					const floodKey = `flood:${chatId}:${msg.from.id}`;
-					const msgCount = (await c.env.KV.get<number>(floodKey, 'json')) || 0;
+					// Edge-local Flood Detection (Bypasses KV 60s constraint)
+					const floodKey = `${chatId}:${msg.from.id}`;
+					const now = Date.now();
+					const userFlood = isolateFloodCache.get(floodKey) || { count: 0, timestamp: now };
 					
-					if (msgCount > 5) {
+					// Reset counter if more than 5 seconds passed
+					if (now - userFlood.timestamp > 5000) {
+						userFlood.count = 0;
+						userFlood.timestamp = now;
+					}
+					
+					userFlood.count += 1;
+					isolateFloodCache.set(floodKey, userFlood);
+					
+					if (userFlood.count > 5) {
 						c.executionCtx.waitUntil(tg.deleteMessage(chatId, msg.message_id));
 						c.executionCtx.waitUntil(tg.restrictChatMember(chatId, msg.from.id, { can_send_messages: false }));
 						return c.text('OK');
 					}
-					// Fire and forget KV write to minimize response latency
-					c.executionCtx.waitUntil(c.env.KV.put(floodKey, JSON.stringify(msgCount + 1), { expirationTtl: 5 }));
 
+					// Core Policy Evaluation
 					const settings = await db.getSettings(chatId);
 					const combinedEntities = [...(msg.entities || []), ...(msg.caption_entities || [])];
 					const combinedTextLength = (msg.text || msg.caption || '').length;
@@ -79,8 +92,7 @@ export async function handleWebhook(c: Context<{ Bindings: Env }>) {
 		return c.text('OK');
 
 	} catch (error) {
-		console.error("Critical Webhook Pipeline Failure:", error);
-		// Always return 200 to Telegram to prevent infinite retry loops on failure
-		return c.text('OK'); 
+		console.error("Pipeline Failure:", error);
+		return c.text('OK'); // Prevent infinite Telegram retry loops
 	}
 }
